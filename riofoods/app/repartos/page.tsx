@@ -3,9 +3,17 @@ import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import SupabaseWarning from '@/components/SupabaseWarning';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { Pedido, EstadoPedido } from '@/lib/types';
+import { Pedido, EstadoPedido, gananciaPedido, costoPedido } from '@/lib/types';
 import { fmtMoney, fmtFechaLarga, hoyISO } from '@/lib/format';
-import { FileDown, Check, Phone, MapPin } from 'lucide-react';
+import {
+  FileDown,
+  Check,
+  Phone,
+  MapPin,
+  Navigation,
+  TrendingUp,
+  AlertCircle,
+} from 'lucide-react';
 
 export default function RepartosPage() {
   const [fecha, setFecha] = useState(hoyISO());
@@ -44,6 +52,45 @@ export default function RepartosPage() {
   );
   const paraPreparar = Object.values(agregado).sort((a, b) => b.cant - a.cant);
   const totalDia = pedidos.reduce((s, p) => s + Number(p.total), 0);
+  const gananciaDia = pedidos.reduce((s, p) => s + gananciaPedido(p), 0);
+  const costoDia = pedidos.reduce((s, p) => s + costoPedido(p), 0);
+
+  // Pedidos con dirección para Maps
+  const conDireccion = pedidos.filter(
+    (p) => p.contacto?.direccion && p.contacto.direccion.trim().length > 0
+  );
+  const sinDireccion = pedidos.length - conDireccion.length;
+
+  function abrirRutaMaps() {
+    if (conDireccion.length === 0) {
+      alert('Ningún pedido tiene dirección cargada.');
+      return;
+    }
+    // Google Maps acepta hasta ~10 waypoints en URL gratuita
+    const direcciones = conDireccion
+      .map((p) => p.contacto!.direccion!)
+      .map((d) => encodeURIComponent(d + ', Río Cuarto, Córdoba, Argentina'));
+
+    if (conDireccion.length === 1) {
+      window.open(`https://www.google.com/maps/search/?api=1&query=${direcciones[0]}`, '_blank');
+      return;
+    }
+
+    // Ruta: origin = primera, destination = última, waypoints = el resto
+    const origin = direcciones[0];
+    const destination = direcciones[direcciones.length - 1];
+    const waypoints = direcciones.slice(1, -1).join('|');
+
+    let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}&travelmode=driving`;
+    if (waypoints) url += `&waypoints=${waypoints}`;
+
+    window.open(url, '_blank');
+  }
+
+  function abrirEnMaps(direccion: string) {
+    const query = encodeURIComponent(direccion + ', Río Cuarto, Córdoba, Argentina');
+    window.open(`https://www.google.com/maps/search/?api=1&query=${query}`, '_blank');
+  }
 
   async function exportarPDF() {
     const { default: jsPDF } = await import('jspdf');
@@ -106,14 +153,18 @@ export default function RepartosPage() {
       y += 3;
     });
 
-    if (y > 260) {
+    if (y > 250) {
       doc.addPage();
       y = 20;
     }
     y += 6;
     doc.setFontSize(11);
     doc.setFont(undefined, 'bold');
-    doc.text(`Total del día: ${fmtMoney(totalDia)} · ${pedidos.length} pedidos`, 14, y);
+    doc.text(`Total facturado: ${fmtMoney(totalDia)} · ${pedidos.length} pedidos`, 14, y);
+    y += 6;
+    doc.text(`Costos del día: ${fmtMoney(costoDia)}`, 14, y);
+    y += 6;
+    doc.text(`Ganancia bruta: ${fmtMoney(gananciaDia)}`, 14, y);
 
     doc.save(`reparto-${fecha}.pdf`);
   }
@@ -126,7 +177,7 @@ export default function RepartosPage() {
           <h1 className="text-2xl font-semibold text-rio-white">Repartos del día</h1>
           <p className="text-sm text-rio-muted capitalize">{fmtFechaLarga(fecha)}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <input
             type="date"
             value={fecha}
@@ -139,10 +190,15 @@ export default function RepartosPage() {
           <button onClick={exportarPDF} className="btn">
             <FileDown size={16} /> PDF
           </button>
+          {conDireccion.length > 0 && (
+            <button onClick={abrirRutaMaps} className="btn btn-primary">
+              <Navigation size={16} /> Ruta en Maps
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <div className="card">
           <p className="text-xs text-rio-muted">Pedidos</p>
           <p className="text-xl font-semibold text-rio-white mt-1">{pedidos.length}</p>
@@ -151,6 +207,12 @@ export default function RepartosPage() {
           <p className="text-xs text-rio-muted">A cobrar</p>
           <p className="text-xl font-semibold text-rio-red mt-1">{fmtMoney(totalDia)}</p>
         </div>
+        <div className="card border-green-700">
+          <p className="text-xs text-rio-muted flex items-center gap-1">
+            <TrendingUp size={11} /> Ganancia
+          </p>
+          <p className="text-xl font-semibold text-green-400 mt-1">{fmtMoney(gananciaDia)}</p>
+        </div>
         <div className="card">
           <p className="text-xs text-rio-muted">Entregados</p>
           <p className="text-xl font-semibold text-rio-white mt-1">
@@ -158,6 +220,16 @@ export default function RepartosPage() {
           </p>
         </div>
       </div>
+
+      {sinDireccion > 0 && (
+        <div className="card mb-4 border-yellow-700 bg-yellow-900/10 flex items-start gap-2">
+          <AlertCircle size={16} className="text-yellow-500 shrink-0 mt-0.5" />
+          <p className="text-xs text-yellow-200">
+            {sinDireccion} {sinDireccion === 1 ? 'pedido no tiene' : 'pedidos no tienen'} dirección
+            cargada. No aparecerán en la ruta de Maps.
+          </p>
+        </div>
+      )}
 
       {paraPreparar.length > 0 && (
         <div className="card mb-4 border-rio-red">
@@ -184,58 +256,72 @@ export default function RepartosPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {pedidos.map((p) => (
-            <div
-              key={p.id}
-              className={`card ${p.estado === 'entregado' ? 'opacity-60' : ''}`}
-            >
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-rio-white">{p.contacto?.nombre || '—'}</p>
-                  {p.contacto?.telefono && (
-                    <a
-                      href={`tel:${p.contacto.telefono}`}
-                      className="text-xs text-rio-muted flex items-center gap-1 mt-1 hover:text-rio-white"
-                    >
-                      <Phone size={11} /> {p.contacto.telefono}
-                    </a>
-                  )}
-                  {p.contacto?.direccion && (
-                    <p className="text-xs text-rio-muted flex items-center gap-1 mt-0.5">
-                      <MapPin size={11} /> {p.contacto.direccion}
-                    </p>
-                  )}
-                  {p.notas && (
-                    <p className="text-xs text-yellow-400 mt-2 italic">📝 {p.notas}</p>
-                  )}
-                </div>
-                <div className="text-right">
-                  <p className="text-lg font-semibold text-rio-red">{fmtMoney(Number(p.total))}</p>
-                  <p className="text-xs text-rio-muted mt-0.5">{p.estado}</p>
-                </div>
-              </div>
-              <div className="mt-3 pt-3 border-t border-rio-ash text-sm space-y-1">
-                {(p.items || []).map((i, idx) => (
-                  <div key={idx} className="flex justify-between text-xs">
-                    <span className="text-rio-white">
-                      {i.cantidad} {i.tipo} · {i.producto_nombre}
-                    </span>
-                    <span className="text-rio-muted">
-                      {fmtMoney(Number(i.cantidad) * Number(i.precio_unit))}
-                    </span>
+          {pedidos.map((p, idx) => {
+            const ganancia = gananciaPedido(p);
+            return (
+              <div
+                key={p.id}
+                className={`card ${p.estado === 'entregado' ? 'opacity-60' : ''}`}
+              >
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-rio-red flex items-center justify-center text-xs font-semibold text-white">
+                        {idx + 1}
+                      </div>
+                      <p className="font-medium text-rio-white">{p.contacto?.nombre || '—'}</p>
+                    </div>
+                    {p.contacto?.telefono && (
+                      <a
+                        href={`tel:${p.contacto.telefono}`}
+                        className="text-xs text-rio-muted flex items-center gap-1 mt-1 hover:text-rio-white"
+                      >
+                        <Phone size={11} /> {p.contacto.telefono}
+                      </a>
+                    )}
+                    {p.contacto?.direccion && (
+                      <button
+                        onClick={() => abrirEnMaps(p.contacto!.direccion!)}
+                        className="text-xs text-rio-muted flex items-center gap-1 mt-0.5 hover:text-rio-red text-left"
+                      >
+                        <MapPin size={11} /> {p.contacto.direccion}
+                      </button>
+                    )}
+                    {p.notas && (
+                      <p className="text-xs text-yellow-400 mt-2 italic">📝 {p.notas}</p>
+                    )}
                   </div>
-                ))}
+                  <div className="text-right">
+                    <p className="text-lg font-semibold text-rio-red">
+                      {fmtMoney(Number(p.total))}
+                    </p>
+                    <p className="text-xs text-green-400 mt-0.5">+{fmtMoney(ganancia)}</p>
+                    <p className="text-xs text-rio-muted mt-0.5">{p.estado}</p>
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-rio-ash text-sm space-y-1">
+                  {(p.items || []).map((i, k) => (
+                    <div key={k} className="flex justify-between text-xs">
+                      <span className="text-rio-white">
+                        {i.cantidad} {i.tipo} · {i.producto_nombre}
+                      </span>
+                      <span className="text-rio-muted">
+                        {fmtMoney(Number(i.cantidad) * Number(i.precio_unit))}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {p.estado !== 'entregado' && (
+                  <button
+                    onClick={() => marcarEntregado(p.id)}
+                    className="btn btn-primary w-full mt-3"
+                  >
+                    <Check size={16} /> Marcar entregado
+                  </button>
+                )}
               </div>
-              {p.estado !== 'entregado' && (
-                <button
-                  onClick={() => marcarEntregado(p.id)}
-                  className="btn btn-primary w-full mt-3"
-                >
-                  <Check size={16} /> Marcar entregado
-                </button>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </AppShell>

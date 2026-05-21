@@ -3,9 +3,17 @@ import { useEffect, useState } from 'react';
 import AppShell from '@/components/AppShell';
 import SupabaseWarning from '@/components/SupabaseWarning';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { Pedido, Contacto, Producto, PedidoItem, EstadoPedido } from '@/lib/types';
+import {
+  Pedido,
+  Contacto,
+  Producto,
+  PedidoItem,
+  EstadoPedido,
+  gananciaPedido,
+  costoPedido,
+} from '@/lib/types';
 import { fmtMoney, fmtFecha, hoyISO } from '@/lib/format';
-import { Plus, X, Trash2, FileDown, Pencil, Search } from 'lucide-react';
+import { Plus, X, Trash2, FileDown, Pencil, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
 
 export default function PedidosPage() {
@@ -58,6 +66,8 @@ export default function PedidosPage() {
   });
 
   const totalVisible = visibles.reduce((s, p) => s + Number(p.total || 0), 0);
+  const gananciaTotal = visibles.reduce((s, p) => s + gananciaPedido(p), 0);
+  const costoTotal = visibles.reduce((s, p) => s + costoPedido(p), 0);
 
   async function exportarPDF() {
     const { default: jsPDF } = await import('jspdf');
@@ -79,10 +89,11 @@ export default function PedidosPage() {
       p.estado,
       p.items?.length || 0,
       fmtMoney(Number(p.total)),
+      fmtMoney(gananciaPedido(p)),
     ]);
     doc.autoTable({
       startY: 32,
-      head: [['Fecha', 'Cliente', 'Estado', 'Items', 'Total']],
+      head: [['Fecha', 'Cliente', 'Estado', 'Items', 'Total', 'Ganancia']],
       body: rows,
       headStyles: { fillColor: [220, 38, 38] },
       styles: { fontSize: 9 },
@@ -90,6 +101,7 @@ export default function PedidosPage() {
     const finalY = doc.lastAutoTable?.finalY || 50;
     doc.setFontSize(11);
     doc.text(`Total: ${fmtMoney(totalVisible)} · ${visibles.length} pedidos`, 14, finalY + 10);
+    doc.text(`Ganancia bruta: ${fmtMoney(gananciaTotal)}`, 14, finalY + 17);
     doc.save(`pedidos-${hoyISO()}.pdf`);
   }
 
@@ -154,20 +166,24 @@ export default function PedidosPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <div className="card">
           <p className="text-xs text-rio-muted">Pedidos</p>
           <p className="text-xl font-semibold text-rio-white mt-1">{visibles.length}</p>
         </div>
         <div className="card">
-          <p className="text-xs text-rio-muted">Total</p>
+          <p className="text-xs text-rio-muted">Facturado</p>
           <p className="text-xl font-semibold text-rio-white mt-1">{fmtMoney(totalVisible)}</p>
         </div>
         <div className="card">
-          <p className="text-xs text-rio-muted">Promedio</p>
-          <p className="text-xl font-semibold text-rio-white mt-1">
-            {fmtMoney(visibles.length ? totalVisible / visibles.length : 0)}
+          <p className="text-xs text-rio-muted">Costos</p>
+          <p className="text-xl font-semibold text-rio-muted mt-1">{fmtMoney(costoTotal)}</p>
+        </div>
+        <div className="card border-green-700">
+          <p className="text-xs text-rio-muted flex items-center gap-1">
+            <TrendingUp size={11} /> Ganancia
           </p>
+          <p className="text-xl font-semibold text-green-400 mt-1">{fmtMoney(gananciaTotal)}</p>
         </div>
       </div>
 
@@ -177,52 +193,63 @@ export default function PedidosPage() {
         </div>
       ) : (
         <div className="space-y-2">
-          {visibles.map((p) => (
-            <div key={p.id} className="card">
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-medium text-rio-white">{p.contacto?.nombre || '—'}</p>
-                    <EstadoBadge estado={p.estado} />
+          {visibles.map((p) => {
+            const ganancia = gananciaPedido(p);
+            return (
+              <div key={p.id} className="card">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-medium text-rio-white">{p.contacto?.nombre || '—'}</p>
+                      <EstadoBadge estado={p.estado} />
+                    </div>
+                    <p className="text-xs text-rio-muted mt-0.5">
+                      {fmtFecha(p.fecha_entrega)} · {p.items?.length || 0} ítems
+                    </p>
+                    {p.notas && <p className="text-xs text-rio-muted mt-1 italic">{p.notas}</p>}
                   </div>
-                  <p className="text-xs text-rio-muted mt-0.5">
-                    {fmtFecha(p.fecha_entrega)} · {p.items?.length || 0} ítems
-                  </p>
-                  {p.notas && <p className="text-xs text-rio-muted mt-1 italic">{p.notas}</p>}
+                  <div className="text-right">
+                    <p className="text-lg font-semibold text-rio-red">{fmtMoney(Number(p.total))}</p>
+                    <p className="text-xs mt-0.5">
+                      <span className="text-rio-muted">Ganancia: </span>
+                      <span
+                        className={ganancia > 0 ? 'text-green-400 font-medium' : 'text-rio-muted'}
+                      >
+                        {fmtMoney(ganancia)}
+                      </span>
+                    </p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-lg font-semibold text-rio-red">{fmtMoney(Number(p.total))}</p>
-                </div>
-              </div>
-              <div className="flex items-center justify-between mt-3 pt-3 border-t border-rio-ash flex-wrap gap-2">
-                <select
-                  value={p.estado}
-                  onChange={(e) => cambiarEstado(p.id, e.target.value as EstadoPedido)}
-                  className="text-xs w-auto"
-                  style={{ width: 'auto', padding: '4px 8px' }}
-                >
-                  <option value="pendiente">Pendiente</option>
-                  <option value="preparado">Preparado</option>
-                  <option value="entregado">Entregado</option>
-                  <option value="cancelado">Cancelado</option>
-                </select>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => {
-                      setEditando(p);
-                      setShowModal(true);
-                    }}
-                    className="btn btn-ghost p-2"
+                <div className="flex items-center justify-between mt-3 pt-3 border-t border-rio-ash flex-wrap gap-2">
+                  <select
+                    value={p.estado}
+                    onChange={(e) => cambiarEstado(p.id, e.target.value as EstadoPedido)}
+                    className="text-xs"
+                    style={{ width: 'auto', padding: '4px 8px' }}
                   >
-                    <Pencil size={14} />
-                  </button>
-                  <button onClick={() => eliminar(p.id)} className="btn btn-ghost p-2 text-rio-red">
-                    <Trash2 size={14} />
-                  </button>
+                    <option value="pendiente">Pendiente</option>
+                    <option value="preparado">Preparado</option>
+                    <option value="entregado">Entregado</option>
+                    <option value="cancelado">Cancelado</option>
+                  </select>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => {
+                        setEditando(p);
+                        setShowModal(true);
+                      }}
+                      className="btn btn-ghost p-2"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button onClick={() => eliminar(p.id)} className="btn btn-ghost p-2 text-rio-red">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -290,6 +317,7 @@ function PedidoModal({
           tipo: prod.tipo,
           cantidad: 1,
           precio_unit: prod.precio,
+          costo_unit: prod.costo || 0,
         },
       ]);
     }
@@ -304,6 +332,11 @@ function PedidoModal({
   }
 
   const total = items.reduce((s, i) => s + Number(i.cantidad) * Number(i.precio_unit), 0);
+  const costoTotal = items.reduce(
+    (s, i) => s + Number(i.cantidad) * Number(i.costo_unit || 0),
+    0
+  );
+  const ganancia = total - costoTotal;
 
   async function guardar() {
     if (!contactoId) return alert('Elegí un cliente');
@@ -332,6 +365,7 @@ function PedidoModal({
           tipo: i.tipo,
           cantidad: i.cantidad,
           precio_unit: i.precio_unit,
+          costo_unit: i.costo_unit || 0,
         }))
       );
     } else {
@@ -355,6 +389,7 @@ function PedidoModal({
             tipo: i.tipo,
             cantidad: i.cantidad,
             precio_unit: i.precio_unit,
+            costo_unit: i.costo_unit || 0,
           }))
         );
       }
@@ -449,9 +484,7 @@ function PedidoModal({
                       step="0.01"
                       min="0"
                       value={it.cantidad}
-                      onChange={(e) =>
-                        actualizar(idx, 'cantidad', Number(e.target.value) || 0)
-                      }
+                      onChange={(e) => actualizar(idx, 'cantidad', Number(e.target.value) || 0)}
                       className="col-span-2 text-sm"
                       placeholder="Cant."
                     />
@@ -460,9 +493,7 @@ function PedidoModal({
                       step="0.01"
                       min="0"
                       value={it.precio_unit}
-                      onChange={(e) =>
-                        actualizar(idx, 'precio_unit', Number(e.target.value) || 0)
-                      }
+                      onChange={(e) => actualizar(idx, 'precio_unit', Number(e.target.value) || 0)}
                       className="col-span-3 text-sm"
                       placeholder="Precio"
                     />
@@ -481,16 +512,28 @@ function PedidoModal({
             </div>
           )}
         </div>
-        <div className="p-4 border-t border-rio-ash flex items-center justify-between">
-          <div>
-            <p className="text-xs text-rio-muted">Total</p>
-            <p className="text-xl font-semibold text-rio-red">{fmtMoney(total)}</p>
+        <div className="p-4 border-t border-rio-ash">
+          <div className="grid grid-cols-3 gap-3 mb-3 text-center">
+            <div>
+              <p className="text-xs text-rio-muted">Total</p>
+              <p className="text-base font-semibold text-rio-red">{fmtMoney(total)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-rio-muted">Costo</p>
+              <p className="text-base font-semibold text-rio-muted">{fmtMoney(costoTotal)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-rio-muted">Ganancia</p>
+              <p className={`text-base font-semibold ${ganancia > 0 ? 'text-green-400' : 'text-rio-muted'}`}>
+                {fmtMoney(ganancia)}
+              </p>
+            </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={onClose} className="btn">
+            <button onClick={onClose} className="btn flex-1">
               Cancelar
             </button>
-            <button onClick={guardar} disabled={guardando} className="btn btn-primary">
+            <button onClick={guardar} disabled={guardando} className="btn btn-primary flex-1">
               {guardando ? 'Guardando…' : 'Guardar'}
             </button>
           </div>

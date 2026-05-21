@@ -8,10 +8,19 @@ export interface Producto {
   descripcion?: string | null;
   tipo: TipoProducto;
   precio: number;
+  costo: number;
   imagen_url?: string | null;
   activo: boolean;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface ProductoCosto {
+  id: string;
+  producto_id: string;
+  costo: number;
+  notas?: string | null;
+  created_at: string;
 }
 
 export interface Contacto {
@@ -19,6 +28,8 @@ export interface Contacto {
   nombre: string;
   telefono?: string | null;
   direccion?: string | null;
+  lat?: number | null;
+  lng?: number | null;
   notas?: string | null;
   tipo: TipoContacto;
   bot_activo: boolean;
@@ -52,6 +63,7 @@ export interface PedidoItem {
   tipo: TipoProducto;
   cantidad: number;
   precio_unit: number;
+  costo_unit: number;
   subtotal?: number;
 }
 
@@ -66,3 +78,25 @@ export interface Pedido {
   contacto?: Contacto;
   items?: PedidoItem[];
 }
+
+// Helpers de ganancia
+export const gananciaPedido = (p: Pedido): number => {
+  if (!p.items) return 0;
+  return p.items.reduce(
+    (s, i) => s + (Number(i.precio_unit) - Number(i.costo_unit || 0)) * Number(i.cantidad),
+    0
+  );
+};
+
+export const costoPedido = (p: Pedido): number => {
+  if (!p.items) return 0;
+  return p.items.reduce(
+    (s, i) => s + Number(i.costo_unit || 0) * Number(i.cantidad),
+    0
+  );
+};
+
+export const margenPct = (precio: number, costo: number): number => {
+  if (!precio || precio === 0) return 0;
+  return ((precio - costo) / precio) * 100;
+};
